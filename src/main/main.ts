@@ -1,7 +1,6 @@
 /* eslint global-require: off, no-console: off, promise/always-return: off */
 
 import "@/main/setup";
-
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
