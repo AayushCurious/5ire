@@ -1,5 +1,4 @@
 /* eslint global-require: off, no-console: off, promise/always-return: off */
-// import 'v8-compile-cache';
 
 import "@/main/setup";
 
@@ -22,7 +21,6 @@ import {
   shell,
 } from "electron";
 import Store from "electron-store";
-import { ensureDirSync } from "fs-extra";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import fetch from "node-fetch";
 import type { IMCPServer } from "types/mcp";
@@ -107,12 +105,6 @@ Container.singleton(Environment, () => {
     deepLinkProtocol: app.isPackaged ? "app.5ire" : "dev.5ire",
   };
 
-  ensureDirSync(env.embedderCacheFolder);
-  ensureDirSync(env.embedderModelsFolder);
-  ensureDirSync(env.storiesFolder);
-  ensureDirSync(env.databaseDataFolder);
-  ensureDirSync(env.logsFolder);
-
   return env;
 });
 
@@ -155,7 +147,7 @@ Container.singleton(DeepLinkHandler, () => new DeepLinkHandler());
 Container.singleton(DeepLinkHandlerBridge, () => new DeepLinkHandlerBridge());
 Container.singleton(ShutdownCoordinator, () => new ShutdownCoordinator());
 
-// init crash reporter
+// Init crash reporter
 (() => {
   const logger = Container.inject(Logger).scope("Main:InitCrashReporter");
   const env = Container.inject(Environment);
@@ -204,12 +196,12 @@ const onDeepLink = (link: string) => {
         const json = JSON.parse(data);
         if (isValidMCPServer(json) && isValidMCPServerKey(json.name)) {
           if (mcp.isServerExist(json.name)) {
-            const dialogOpts = {
+            const dialogOpts: MessageBoxOptions = {
               type: "info",
               buttons: ["Ok"],
               title: "Server Exists",
               message: `The server ${json.name} already exists`,
-            } as MessageBoxOptions;
+            };
             dialog.showMessageBox(dialogOpts);
             return;
           }
@@ -220,30 +212,30 @@ const onDeepLink = (link: string) => {
           }
           return;
         }
-        const dialogOpts = {
+        const dialogOpts: MessageBoxOptions = {
           type: "error",
           buttons: ["Ok"],
           title: "Install Tool Failed",
           message: "Invalid Format, please check the link and try again.",
-        } as MessageBoxOptions;
+        };
         dialog.showMessageBox(dialogOpts);
       } catch (error) {
         console.error(error);
-        const dialogOpts = {
+        const dialogOpts: MessageBoxOptions = {
           type: "error",
           buttons: ["Ok"],
           title: "Install Tool Failed",
           message: "Invalid JSON, please check the link and try again.",
-        } as MessageBoxOptions;
+        };
         dialog.showMessageBox(dialogOpts);
       }
     } else {
-      const dialogOpts = {
+      const dialogOpts: MessageBoxOptions = {
         type: "error",
         buttons: ["Ok"],
         title: "Install Tool Failed",
         message: "Invalid base64 data, please check the link and try again.",
-      } as MessageBoxOptions;
+      };
       dialog.showMessageBox(dialogOpts);
     }
   } else {
@@ -267,7 +259,7 @@ const openSafeExternal = (url: string) => {
 };
 
 const handleDeepLinkOnColdStart = () => {
-  // windows & linux
+  // Windows & Linux
   const deepLinkingUrl = process.argv.length > 1 ? process.argv[process.argv.length - 1] : null;
   if (deepLinkingUrl && deepLinkingUrl.startsWith(`${protocol}://`)) {
     app.once("ready", () => {
@@ -286,6 +278,7 @@ const handleDeepLinkOnColdStart = () => {
     }
   });
 };
+
 const gotTheLock = app.requestSingleInstanceLock();
 
 if (!gotTheLock) {
@@ -308,6 +301,16 @@ if (!gotTheLock) {
     .then(async () => {
       const logger = Container.inject(Logger).scope("Main:WhenReady");
       const environment = Container.inject(Environment);
+
+      // Async Directory Setup
+      await Promise.all([
+        fs.promises.mkdir(environment.embedderCacheFolder, { recursive: true }),
+        fs.promises.mkdir(environment.embedderModelsFolder, { recursive: true }),
+        fs.promises.mkdir(environment.storiesFolder, { recursive: true }),
+        fs.promises.mkdir(environment.databaseDataFolder, { recursive: true }),
+        fs.promises.mkdir(environment.logsFolder, { recursive: true }),
+      ]);
+
       const legacySqliteDatabase = initLegacyDatabase();
 
       logger.info("User data folder:", environment.userDataFolder);
@@ -378,8 +381,6 @@ if (!gotTheLock) {
       app.on("window-all-closed", () => {
         logger.flush();
 
-        // Respect the OSX convention of having the application in memory even
-        // after all windows have been closed
         if (process.platform !== "darwin") {
           app.quit();
           process.exit(0);
@@ -389,6 +390,11 @@ if (!gotTheLock) {
       app.on("before-quit", async () => {
         const logger = Container.inject(Logger).scope("Main:AppOnBeforeQuit");
         ipcMain.removeAllListeners();
+
+        // Abort all in-flight request controllers
+        activeRequests.forEach((controller) => controller.abort());
+        activeRequests.clear();
+
         try {
           await mcp.close();
         } catch (error) {
@@ -398,7 +404,6 @@ if (!gotTheLock) {
       });
 
       app.on("certificate-error", (event, _webContents, _url, _error, _certificate, callback) => {
-        // 允许私有证书
         event.preventDefault();
         callback(true);
       });
@@ -427,7 +432,7 @@ if (!gotTheLock) {
   handleDeepLinkOnColdStart();
 }
 
-// IPCs
+// IPC Handlers
 
 ipcMain.on("install-tool-listener-ready", () => {
   rendererReady = true;
@@ -442,9 +447,10 @@ const activeRequests = new Map<string, AbortController>();
 ipcMain.handle("request", async (event, options) => {
   const logger = Container.inject(Logger).scope("Main:Request");
   const { url, method, headers, body, proxy, isStream } = options;
-  const requestId = Math.random().toString(36).substr(2, 9);
+  const requestId = Math.random().toString(36).substring(2, 11);
   const abortController = new AbortController();
   activeRequests.set(requestId, abortController);
+
   try {
     let agent: HttpsProxyAgent<string> | undefined;
     if (proxy) {
@@ -468,12 +474,13 @@ ipcMain.handle("request", async (event, options) => {
     }
 
     const response = await fetch(url, fetchOptions);
-    // activeRequests.delete(requestId);
 
     if (isStream) {
       const nodeStream = response.body as Readable;
 
       if (nodeStream) {
+        const cleanupStream = () => activeRequests.delete(requestId);
+
         nodeStream.on("data", (chunk: Buffer) => {
           if (!abortController.signal.aborted) {
             event.sender.send("stream-data", requestId, new Uint8Array(chunk));
@@ -481,20 +488,24 @@ ipcMain.handle("request", async (event, options) => {
         });
 
         nodeStream.on("end", () => {
+          cleanupStream();
           event.sender.send("stream-end", requestId);
         });
 
         nodeStream.on("error", (error) => {
+          cleanupStream();
           event.sender.send("stream-error", requestId, error.message);
         });
 
         abortController.signal.addEventListener("abort", () => {
+          cleanupStream();
           if (nodeStream && !nodeStream.destroyed) {
             nodeStream.destroy(new Error("Request cancelled"));
           }
           event.sender.send("stream-end", requestId);
         });
       } else {
+        activeRequests.delete(requestId);
         event.sender.send("stream-end", requestId);
       }
 
@@ -507,6 +518,7 @@ ipcMain.handle("request", async (event, options) => {
         isStream: true,
       };
     }
+
     const text = await response.text();
     return {
       ok: response.ok,
@@ -517,25 +529,26 @@ ipcMain.handle("request", async (event, options) => {
       requestId,
     };
   } catch (error: unknown) {
-    activeRequests.delete(requestId);
     if (error instanceof Error && error.name === "AbortError") {
       logger.info(`Request ${requestId} was cancelled`);
     } else {
       logger.error("Request failed:", error);
     }
     throw error;
+  } finally {
+    if (!isStream) {
+      activeRequests.delete(requestId);
+    }
   }
 });
 
-ipcMain.handle("cancel-request", async (event, requestId: string) => {
+ipcMain.handle("cancel-request", async (_, requestId: string) => {
   const controller = activeRequests.get(requestId);
   if (controller) {
-    console.log(`Cancelling request ${requestId}`);
-    controller.abort(); // 真正取消网络请求
+    controller.abort();
     activeRequests.delete(requestId);
     return true;
   }
-  console.warn(`Request ${requestId} not found or already completed`);
   return false;
 });
 
@@ -556,18 +569,18 @@ ipcMain.on("set-store", (evt, key, val) => {
 
 ipcMain.on("minimize-app", (event) => {
   const window = BrowserWindow.fromWebContents(event.sender);
-
   if (window) {
     window.minimize();
   }
 });
+
 ipcMain.on("maximize-app", (event) => {
   const window = BrowserWindow.fromWebContents(event.sender);
-
   if (window) {
     window.isMaximized() ? window.unmaximize() : window.maximize();
   }
 });
+
 ipcMain.on("close-app", (event) => {
   const window = BrowserWindow.fromWebContents(event.sender);
   if (window) {
@@ -618,7 +631,6 @@ ipcMain.handle("get-system-language", () => {
   return app.getLocale();
 });
 
-// eslint-disable-next-line consistent-return
 ipcMain.handle("select-image-with-base64", async () => {
   const logger = Container.inject(Logger).scope("Main:SelectImageWithBase64");
   try {
@@ -631,22 +643,31 @@ ipcMain.handle("select-image-with-base64", async () => {
         },
       ],
     });
+
+    if (result.canceled || !result.filePaths[0]) {
+      return null;
+    }
+
     const filePath = result.filePaths[0];
     const fileType = await getFileType(filePath);
+
     if (!SUPPORTED_IMAGE_TYPES[fileType]) {
       dialog.showErrorBox("Error", `Unsupported file type ${fileType} for ${filePath}`);
       return null;
     }
+
     const fileInfo: any = await getFileInfo(filePath);
     if (fileInfo.size > KNOWLEDGE_IMPORT_MAX_FILE_SIZE) {
       dialog.showErrorBox(
         "Error",
-        `the size of ${filePath} exceeds the limit (${KNOWLEDGE_IMPORT_MAX_FILE_SIZE / (1024 * 1024)} MB})`,
+        `the size of ${filePath} exceeds the limit (${KNOWLEDGE_IMPORT_MAX_FILE_SIZE / (1024 * 1024)} MB)`,
       );
       return null;
     }
-    const blob = fs.readFileSync(filePath);
-    const base64 = Buffer.from(blob).toString("base64");
+
+    const blob = await fs.promises.readFile(filePath);
+    const base64 = blob.toString("base64");
+
     return JSON.stringify({
       name: fileInfo.name,
       path: filePath,
@@ -658,33 +679,18 @@ ipcMain.handle("select-image-with-base64", async () => {
     logger.capture(err, {
       reason: "Failed to select image with base64",
     });
+    return null;
   }
 });
 
-/** mcp */
-ipcMain.handle("mcp-init", () => {
-  // const logger = Container.inject(Logger).scope("Main:MCPInit");
-  // // eslint-disable-next-line promise/catch-or-return
-  // mcp.init().then(async () => {
-  //   // https://github.com/sindresorhus/fix-path
-  //   logger.info("mcp initialized");
-  //   await mcp.load();
-  //   getMainWindow()?.webContents.send("mcp-server-loaded", mcp.getClientNames());
-  // });
-});
-ipcMain.handle("mcp-add-server", (_, server: IMCPServer) => {
-  // return mcp.addServer(server);
-});
-ipcMain.handle("mcp-update-server", (_, server: IMCPServer) => {
-  // return mcp.updateServer(server);
-});
-ipcMain.handle("mcp-activate", async (_, server: IMCPServer) => {
-  // return mcp.activate(server);
-});
-ipcMain.handle("mcp-deactivate", async (_, clientName: string) => {
-  // return mcp.deactivate(clientName);
-});
-ipcMain.handle("mcp-list-tools", async (_, __: string) => {
+/** MCP IPC Handlers */
+ipcMain.handle("mcp-init", () => {});
+ipcMain.handle("mcp-add-server", () => {});
+ipcMain.handle("mcp-update-server", () => {});
+ipcMain.handle("mcp-activate", () => {});
+ipcMain.handle("mcp-deactivate", () => {});
+
+ipcMain.handle("mcp-list-tools", async () => {
   const logger = Container.inject(Logger).scope("Main:MCPListTools");
   const toolsManager = Container.inject(MCPToolsManager);
   try {
@@ -700,6 +706,7 @@ ipcMain.handle("mcp-list-tools", async (_, __: string) => {
     };
   }
 });
+
 ipcMain.handle("mcp-call-tool", async (_, args: { client: string; name: string; args: any; requestId?: string }) => {
   const logger = Container.inject(Logger).scope("Main:MCPCallTool");
   const toolsManager = Container.inject(MCPToolsManager);
@@ -723,10 +730,12 @@ ipcMain.handle("mcp-call-tool", async (_, args: { client: string; name: string; 
     };
   }
 });
+
 ipcMain.handle("mcp-cancel-tool", (_, requestId: string) => {
   return Container.inject(MCPToolsManager).legacyCancelCall({ requestId });
 });
-ipcMain.handle("mcp-list-prompts", async (_, name: string) => {
+
+ipcMain.handle("mcp-list-prompts", async () => {
   const logger = Container.inject(Logger).scope("Main:MCPListPrompts");
   try {
     return await Container.inject(MCPPromptsManager).legacyList();
@@ -771,6 +780,7 @@ ipcMain.handle("mcp-get-config", () => {
 ipcMain.handle("mcp-put-config", (_, config) => {
   return mcp.putConfig(config);
 });
+
 ipcMain.handle("mcp-get-active-servers", () => {
   return mcp.getClientNames();
 });
@@ -778,52 +788,56 @@ ipcMain.handle("mcp-get-active-servers", () => {
 ipcMain.on("show-context-menu", (event, params) => {
   const template = [];
   if (params.type === "chat-folder") {
-    template.push({
-      label: "Rename",
-      click: () => {
-        event.sender.send("context-menu-command", "rename-chat-folder", {
-          type: "chat-folder",
-          id: params.targetId,
-        });
+    template.push(
+      {
+        label: "Rename",
+        click: () => {
+          event.sender.send("context-menu-command", "rename-chat-folder", {
+            type: "chat-folder",
+            id: params.targetId,
+          });
+        },
       },
-    });
-    template.push({
-      label: "Settings",
-      click: () => {
-        event.sender.send("context-menu-command", "folder-chat-settings", {
-          type: "chat-folder",
-          id: params.targetId,
-        });
+      {
+        label: "Settings",
+        click: () => {
+          event.sender.send("context-menu-command", "folder-chat-settings", {
+            type: "chat-folder",
+            id: params.targetId,
+          });
+        },
       },
-    });
-    template.push({
-      label: "Delete",
-      click: () => {
-        event.sender.send("context-menu-command", "delete-chat-folder", {
-          type: "chat-folder",
-          id: params.targetId,
-        });
+      {
+        label: "Delete",
+        click: () => {
+          event.sender.send("context-menu-command", "delete-chat-folder", {
+            type: "chat-folder",
+            id: params.targetId,
+          });
+        },
       },
-    });
+    );
   } else if (params.type === "chat") {
-    template.push({
-      label: "Rename",
-      click: () => {
-        event.sender.send("context-menu-command", "rename-chat", {
-          type: "chat",
-          id: params.targetId,
-        });
+    template.push(
+      {
+        label: "Rename",
+        click: () => {
+          event.sender.send("context-menu-command", "rename-chat", {
+            type: "chat",
+            id: params.targetId,
+          });
+        },
       },
-    });
-    template.push({
-      label: "Delete",
-      click: () => {
-        event.sender.send("context-menu-command", "delete-chat", {
-          type: "chat",
-          id: params.targetId,
-        });
+      {
+        label: "Delete",
+        click: () => {
+          event.sender.send("context-menu-command", "delete-chat", {
+            type: "chat",
+            id: params.targetId,
+          });
+        },
       },
-    });
+    );
   }
   const menu = Menu.buildFromTemplate(template);
   menu.popup({ window: getMainWindow() as BrowserWindow, x: params.x, y: params.y });
@@ -832,9 +846,11 @@ ipcMain.on("show-context-menu", (event, params) => {
 ipcMain.handle("DocumentLoader::loadFromBuffer", (_, buffer, mimeType) => {
   return DocumentLoader.loadFromBuffer(buffer, mimeType);
 });
+
 ipcMain.handle("DocumentLoader::loadFromURI", (_, url, mimeType) => {
   return DocumentLoader.loadFromURI(url, mimeType);
 });
+
 ipcMain.handle("DocumentLoader::loadFromFilePath", (_, file, mimeType) => {
   return DocumentLoader.loadFromFilePath(file, mimeType);
 });
@@ -845,9 +861,7 @@ if (isDebug) {
   require("electron-debug")();
 }
 
-/**
- * Set Dock icon
- */
+/** Set Dock icon */
 if (app.dock) {
   const dockIcon = nativeImage.createFromPath(`${__dirname}/build/dockicon.png`);
   app.dock.setIcon(dockIcon);
