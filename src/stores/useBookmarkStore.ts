@@ -13,10 +13,8 @@ export interface IBookmarkStore {
   favorites: IBookmark[];
   bookmarks: IBookmark[];
   setActiveBookmarkId: (id: string) => void;
-  createBookmark: (bookmark: IBookmark) => Promise<IBookmark>;
-  updateBookmark: (
-    bookmark: { id: string } & Partial<IBookmark>,
-  ) => Promise<boolean>;
+  createBookmark: (bookmark: Partial<IBookmark>) => Promise<IBookmark>;
+  updateBookmark: (bookmark: { id: string } & Partial<IBookmark>) => Promise<boolean>;
   deleteBookmark: (id: string) => Promise<boolean>;
   getBookmark: (id: string) => Promise<IBookmark>;
   fetchBookmarks: ({
@@ -52,30 +50,37 @@ const useBookmarkStore = create<IBookmarkStore>((set, get) => ({
   activeBookmarkId: null,
   favorites: [],
   bookmarks: [],
+
   setActiveBookmarkId: (id: string) => {
     set({ activeBookmarkId: id });
   },
+
   createBookmark: async (bookmark: Partial<IBookmark>) => {
     const $bookmark = {
       id: typeid('bmk').toString(),
       ...bookmark,
       createdAt: date2unix(new Date()),
     } as IBookmark;
+
     const columns = Object.keys($bookmark);
     await window.electron.db.run(
       `INSERT INTO bookmarks (${columns.join(',')})
       VALUES(${'?'.repeat(columns.length).split('').join(',')})`,
       Object.values($bookmark),
     );
+
     set((state) => ({
       bookmarks: [...state.bookmarks, $bookmark],
     }));
+
     return $bookmark;
   },
+
   updateBookmark: async (bookmark: { id: string } & Partial<IBookmark>) => {
     const $bookmark = { id: bookmark.id } as IBookmark;
     const stats: string[] = [];
     const params: (string | number)[] = [];
+
     if (isNotBlank(bookmark.prompt)) {
       stats.push('prompt = ?');
       $bookmark.prompt = bookmark.prompt as string;
@@ -111,24 +116,29 @@ const useBookmarkStore = create<IBookmarkStore>((set, get) => ({
       $bookmark.reasoning = bookmark.reasoning as string;
       params.push($bookmark.reasoning);
     }
+
     if (bookmark.id && stats.length) {
       params.push($bookmark.id);
       await window.electron.db.run(
         `UPDATE bookmarks SET ${stats.join(', ')} WHERE id = ?`,
         params,
       );
-      const updatedBookmarks = get().bookmarks.map((m: IBookmark) => {
-        if (m.id === $bookmark.id) {
-          return { ...m, ...$bookmark };
-        }
-        return m;
+
+      const updateList = (list: IBookmark[]) =>
+        list.map((m) => (m.id === $bookmark.id ? { ...m, ...$bookmark } : m));
+
+      set({
+        bookmarks: updateList(get().bookmarks),
+        favorites: updateList(get().favorites),
       });
-      set({ bookmarks: updatedBookmarks });
+
       debug('Update Bookmark ', $bookmark);
       return true;
     }
+
     return false;
   },
+
   deleteBookmark: async (id: string) => {
     const ok = await window.electron.db.run(
       `DELETE FROM bookmarks WHERE id = ?`,
@@ -137,28 +147,26 @@ const useBookmarkStore = create<IBookmarkStore>((set, get) => ({
     if (!ok) {
       throw new Error('Delete bookmark failed');
     }
+
     const { bookmarks, favorites } = get();
-    const index = bookmarks.findIndex((item) => item.id === id);
-    if (index > -1) {
-      debug(`Remove bookmark(${id}) from index: ${index})`);
-      bookmarks.splice(index, 1);
-      set({ bookmarks: [...bookmarks] });
-    }
-    const indexOfFavorite = favorites.findIndex((item) => item.id === id);
-    if (indexOfFavorite > -1) {
-      debug(`Remove favorite(${id}) from index: ${indexOfFavorite})`);
-      favorites.splice(indexOfFavorite, 1);
-      set({ favorites: [...favorites] });
-    }
+    
+    set({
+      bookmarks: bookmarks.filter((item) => item.id !== id),
+      favorites: favorites.filter((item) => item.id !== id),
+    });
+
+    debug(`Deleted bookmark(${id})`);
     return true;
   },
+
   getBookmark: async (id: string) => {
     const bookmark = (await window.electron.db.get(
-      `SELECT id, prompt, reply, reasoning, model, temperature, memo, favorite, citedFiles, citedChunks, createdAt WHERE id = ?`,
+      `SELECT id, prompt, reply, reasoning, model, temperature, memo, favorite, citedFiles, citedChunks, createdAt FROM bookmarks WHERE id = ?`,
       [id],
     )) as IBookmark;
     return bookmark;
   },
+
   fetchBookmarks: async ({
     limit = 20,
     offset = 0,
@@ -171,33 +179,38 @@ const useBookmarkStore = create<IBookmarkStore>((set, get) => ({
     favorite?: boolean;
   }) => {
     let sql = `SELECT id, prompt, reply, reasoning, model, temperature, memo, favorite, citedFiles, citedChunks, createdAt FROM bookmarks`;
-    const whereClauses = [];
+    const whereClauses: string[] = [];
     const params: any[] = [];
+
     if (!isNil(favorite)) {
       whereClauses.push('favorite = ?');
       params.push(favorite ? 1 : 0);
     }
+
     if (isNotBlank(keyword)) {
-      whereClauses.push(`(prompt like ? or reply like ? or memo like ?)`);
+      whereClauses.push(`(prompt LIKE ? OR reply LIKE ? OR memo LIKE ?)`);
       const keywordPlaceholder = `%${keyword.trim()}%`;
       params.push(keywordPlaceholder, keywordPlaceholder, keywordPlaceholder);
     }
-    params.push(limit, offset);
+
     if (whereClauses.length > 0) {
       sql += ` WHERE ${whereClauses.join(' AND ')}`;
     }
-    const bookmarks = (await window.electron.db.all(
-      `${sql} ORDER BY createdAt DESC LIMIT ? OFFSET ?`,
-      params,
-    )) as IBookmark[];
+
+    sql += ` ORDER BY createdAt DESC LIMIT ? OFFSET ?`;
+    params.push(limit, offset);
+
+    const bookmarks = (await window.electron.db.all(sql, params)) as IBookmark[];
     return bookmarks;
   },
-  async loadBookmarks({ limit = 20, offset = 0, keyword }) {
+
+  loadBookmarks: async ({ limit = 20, offset = 0, keyword }) => {
     const bookmarks = await get().fetchBookmarks({ limit, offset, keyword });
     set({ bookmarks });
     return bookmarks;
   },
-  async loadFavorites({ limit = 100, offset = 0 }) {
+
+  loadFavorites: async ({ limit = 100, offset = 0 }) => {
     const favorites = await get().fetchBookmarks({
       limit,
       offset,
