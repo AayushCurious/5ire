@@ -48,7 +48,7 @@ if (!OPENAI_API_KEY) {
  * Uses execFile with `sh -c` so multiple invocations can run concurrently
  * instead of blocking the event loop like execSync does.
  * @param {string} cmd - The shell command to execute
- * @returns {Promise<string>} The trimmed stdout output from the command
+ * @returns {Promise<string>} The trimmed stdout output from the commands
  */
 async function sh(cmd: string): Promise<string> {
   try {
