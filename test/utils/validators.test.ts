@@ -8,94 +8,132 @@ import {
 } from '../../src/utils/validators';
 
 describe('utils/validators', () => {
-  test('isValidUsername', () => {
-    expect(isValidUsername('你好')).toBe(true);
-    expect(isValidUsername('你')).toBe(false);
-    expect(isValidUsername('Jack')).toBe(true);
-    expect(isValidUsername('<Jack>')).toBe(false);
-    expect(isValidUsername('Jack-')).toBe(false);
-    expect(isValidUsername('Jack-1')).toBe(false);
-    expect(isValidUsername('Jack.Tom')).toBe(true);
-    expect(isValidUsername('Jack.')).toBe(false);
-    expect(isValidUsername('.Jack')).toBe(false);
-    expect(isValidUsername('Jack.Tom.')).toBe(false);
-    expect(isValidUsername('Ross*Jack')).toBe(false);
-    expect(isValidUsername('Ross&Jack')).toBe(false);
-    expect(isValidUsername('123456789098765432101')).toBe(false);
-    expect(isValidUsername('1123')).toBe(true);
-    expect(isValidUsername("Ross'd")).toBe(false);
-    expect(isValidUsername('Ross"d')).toBe(false);
-    expect(isValidUsername('Ross+Jack')).toBe(false);
-    expect(isValidUsername('Ross‘Jack')).toBe(false);
-    expect(isValidUsername('Ross“Jack')).toBe(false);
-    expect(isValidUsername('Ross?')).toBe(false);
-    expect(isValidUsername('Ross*T')).toBe(false);
-    expect(isValidUsername('    ')).toBe(false);
+  describe('isValidUsername', () => {
+    test.each([
+      ['你好', 'valid Chinese characters'],
+      ['Jack', 'valid alphabetic characters'],
+      ['Jack.Tom', 'valid dot separator in the middle'],
+      ['1123', 'valid numeric characters'],
+    ])('returns true for "%s" (%s)', (username) => {
+      expect(isValidUsername(username)).toBe(true);
+    });
+
+    test.each([
+      ['你', 'too short (1 character)'],
+      ['123456789098765432101', 'too long (exceeds max length)'],
+      ['    ', 'whitespace only'],
+      ['.Jack', 'starts with a dot'],
+      ['Jack.', 'ends with a dot'],
+      ['Jack.Tom.', 'ends with a trailing dot'],
+      ['Jack-', 'ends with a hyphen'],
+      ['Jack-1', 'contains a hyphen'],
+      ['<Jack>', 'contains angle brackets'],
+      ['Ross*Jack', 'contains an asterisk'],
+      ['Ross*T', 'contains an asterisk before a single character'],
+      ['Ross&Jack', 'contains an ampersand'],
+      ["Ross'd", 'contains a single straight quote'],
+      ['Ross"d', 'contains a double straight quote'],
+      ['Ross‘Jack', 'contains a single curly quote'],
+      ['Ross“Jack', 'contains a double curly quote'],
+      ['Ross+Jack', 'contains a plus sign'],
+      ['Ross?', 'contains a question mark'],
+    ])('returns false for "%s" (%s)', (username) => {
+      expect(isValidUsername(username)).toBe(false);
+    });
   });
 
-  test('isValidEmail', () => {
-    expect(isValidEmail('you@company.com')).toBe(true);
-    expect(isValidEmail('you+23@company.cn')).toBe(true);
-    expect(isValidEmail('you@company.co')).toBe(true);
-    expect(isValidEmail('name.lastname@company.com')).toBe(true);
-    expect(isValidEmail('you@company.com.cn')).toBe(true);
-    expect(isValidEmail('you@company')).toBe(false);
-    expect(isValidEmail('you@@company.com')).toBe(false);
-    expect(isValidEmail('@company')).toBe(false);
-    expect(isValidEmail('company')).toBe(false);
-    expect(isValidEmail('you@name@compan.com')).toBe(false);
+  describe('isValidEmail', () => {
+    test.each([
+      ['you@company.com', 'standard email'],
+      ['you+23@company.cn', 'email with plus alias'],
+      ['you@company.co', 'two-letter top-level domain'],
+      ['name.lastname@company.com', 'dot in local part'],
+      ['you@company.com.cn', 'multi-part domain'],
+    ])('returns true for "%s" (%s)', (email) => {
+      expect(isValidEmail(email)).toBe(true);
+    });
+
+    test.each([
+      ['you@company', 'missing top-level domain'],
+      ['you@@company.com', 'consecutive @ symbols'],
+      ['@company', 'missing local part and TLD'],
+      ['company', 'missing @ symbol and domain'],
+      ['you@name@compan.com', 'multiple @ symbols'],
+    ])('returns false for "%s" (%s)', (email) => {
+      expect(isValidEmail(email)).toBe(false);
+    });
   });
 
-  test('isValidPassword', () => {
-    expect(isValidPassword('WX1342')).toBe(true);
-    expect(isValidPassword('WX134')).toBe(false);
-    expect(isValidPassword('134423')).toBe(false);
-    expect(isValidPassword('ewjfhsdakjh')).toBe(false);
-    expect(isValidPassword('Gd2303')).toBe(true);
-    expect(isValidPassword('Pass12345678909876541')).toBe(false);
+  describe('isValidPassword', () => {
+    test.each([
+      ['WX1342', 'uppercase letters and numbers meeting min length'],
+      ['Gd2303', 'mixed-case letters and numbers meeting min length'],
+    ])('returns true for "%s" (%s)', (password) => {
+      expect(isValidPassword(password)).toBe(true);
+    });
+
+    test.each([
+      ['WX134', 'too short (5 characters)'],
+      ['Pass12345678909876541', 'too long (21 characters)'],
+      ['134423', 'numbers only'],
+      ['ewjfhsdakjh', 'letters only'],
+    ])('returns false for "%s" (%s)', (password) => {
+      expect(isValidPassword(password)).toBe(false);
+    });
   });
 
-  test('isValidMCPServer', () => {
-    const svr1 = {
+  describe('isValidMCPServer', () => {
+    const baseServerConfig = {
       name: 'AMap',
       command: 'npx',
       description: 'MCP Server for AMap (GaoDe Map)',
-      args: ['-y', '@amap/amap-maps-mcp-server'],
       env: {
         AMAP_MAPS_API_KEY:
           '{{amapKey@string::got it from https://lbs.amap.com/api/mcp-server/create-project-and-key }}',
       },
       homepage: 'https://lbs.amap.com/api/mcp-server/summary',
     };
-    expect(isValidMCPServer(svr1)).toBe(true);
 
-    const svr2 = {
-      name: 'InvalidServer',
-      command: 'invalid-command',
-      args: 'not-an-array',
-    };
-    expect(isValidMCPServer(svr2)).toBe(false);
+    test('returns true for a complete valid server configuration with args', () => {
+      const serverWithArgs = {
+        ...baseServerConfig,
+        args: ['-y', '@amap/amap-maps-mcp-server'],
+      };
 
-    const svr3 = {
-      name: 'AMap',
-      command: 'npx',
-      description: 'MCP Server for AMap (GaoDe Map)',
-      env: {
-        AMAP_MAPS_API_KEY:
-          '{{amapKey@string::got it from https://lbs.amap.com/api/mcp-server/create-project-and-key }}',
-      },
-      homepage: 'https://lbs.amap.com/api/mcp-server/summary',
-    };
-    expect(isValidMCPServer(svr3)).toBe(true);
+      expect(isValidMCPServer(serverWithArgs)).toBe(true);
+    });
+
+    test('returns true for a valid server configuration without optional args', () => {
+      expect(isValidMCPServer(baseServerConfig)).toBe(true);
+    });
+
+    test('returns false when args is not an array', () => {
+      const invalidServer = {
+        name: 'InvalidServer',
+        command: 'invalid-command',
+        args: 'not-an-array',
+      };
+
+      expect(isValidMCPServer(invalidServer)).toBe(false);
+    });
   });
 
-  test('isValidMCPServerKey', () => {
-    expect(isValidMCPServerKey('AMap')).toBe(true);
-    expect(isValidMCPServerKey('valid-key')).toBe(true);
-    expect(isValidMCPServerKey('invalid-key-')).toBe(false);
-    expect(isValidMCPServerKey('invalid-key-1')).toBe(true);
-    expect(isValidMCPServerKey('invalid-key--1')).toBe(false);
-    expect(isValidMCPServerKey('invalid-key-1-')).toBe(false);
-    expect(isValidMCPServerKey('invalid-key-1-2')).toBe(true);
+  describe('isValidMCPServerKey', () => {
+    test.each([
+      ['AMap', 'alphanumeric PascalCase'],
+      ['valid-key', 'lowercase words separated by a single hyphen'],
+      ['invalid-key-1', 'lowercase words ending with a hyphen and number'],
+      ['invalid-key-1-2', 'multiple hyphen-separated segments'],
+    ])('returns true for "%s" (%s)', (key) => {
+      expect(isValidMCPServerKey(key)).toBe(true);
+    });
+
+    test.each([
+      ['invalid-key-', 'trailing hyphen'],
+      ['invalid-key--1', 'consecutive hyphens'],
+      ['invalid-key-1-', 'trailing hyphen after number'],
+    ])('returns false for "%s" (%s)', (key) => {
+      expect(isValidMCPServerKey(key)).toBe(false);
+    });
   });
 });
